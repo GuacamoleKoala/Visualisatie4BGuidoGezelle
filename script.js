@@ -3,7 +3,7 @@ const map = L.map('map').setView([50.85, 4.35], 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
 const markers = L.markerClusterGroup({ 
-    spiderfyOnMaxZoom: true, // Zorgt voor het uitspreiden op max zoom (bij klikken op cluster)
+    spiderfyOnMaxZoom: true, 
     showCoverageOnHover: false,
     zoomToBoundsOnClick: true
 });
@@ -11,30 +11,38 @@ const markers = L.markerClusterGroup({
 let fullGeoJsonData = null; 
 let geoJsonLayer = null;    
 
+// Definieer de kleuren voor de legenda
 const nodeColors = {
     'Person': '#E91E63', 
     'City': '#3388ff',   
 };
 
+// NIEUWE FUNCTIE: Bepaalt het Type voor consistentie, kleur en filtering
+function getNodeType(originalType) {
+    if (originalType === 'Person') {
+        return 'Person';
+    }
+    // Alle andere types (Location, Town, City, etc.) worden behandeld als 'City' (Plaats)
+    return 'City';
+}
+
 // --- FUNCTIES VOOR INTERACTIE ---
 
-// Functie om de HTML voor de relatiepopup te genereren (Knoop klik)
 function generateNodePopupHtml(props) {
+    // Deze functie blijft identiek, de logica zit in het Python script en de filtering
     let popupHtml = `<div class="node-popup">
         <h3>${props.label}</h3>
-        <p><b>Type:</b> ${props.type}</p>
+        <p><b>Type:</b> ${getNodeType(props.type)}</p>
         <hr>
         <b>Relaties (${props.relations ? props.relations.length : 0}):</b><br>
         <ul style="max-height: 150px; overflow-y: auto; padding-left: 20px;">`;
 
-    // Sorteer op richting: 'naar' (uitgaand) komt voor 'van' (inkomend)
-    const sortedRelations = props.relations.sort((a, b) => a.dir.localeCompare(b.dir));
+    const sortedRelations = props.relations ? props.relations.sort((a, b) => a.dir.localeCompare(b.dir)) : [];
 
-    if (sortedRelations && sortedRelations.length > 0) {
+    if (sortedRelations.length > 0) {
         sortedRelations.forEach(rel => {
             const directionText = rel.dir === "naar" ? 'gaat naar' : 'komt van';
             const icon = rel.dir === "naar" ? '<i class="fas fa-arrow-right"></i>' : '<i class="fas fa-arrow-left"></i>';
-            // De cruciale in- en uitgaande informatie
             popupHtml += `<li>${icon} <i>${rel.rel}</i> ${directionText} <b>${rel.target}</b></li>`;
         });
     } else {
@@ -44,18 +52,16 @@ function generateNodePopupHtml(props) {
     return popupHtml;
 }
 
-// Functie om de popup voor een Lijn te genereren (Lijn klik)
 function generateLinePopupHtml(props) {
      return `
         <h3>Relatie Detail</h3>
         <p><b>Relatie Type:</b> ${props.relationship}</p>
         <hr>
-        <p><b>Van:</b> ${props.source_label}</p>
-        <p><b>Naar:</b> ${props.target_label}</p>
+        <p><b>Van:</b> ${props.source_label || 'Onbekend'}</p>
+        <p><b>Naar:</b> ${props.target_label || 'Onbekend'}</p>
     `;
 }
 
-// Algemene functie voor popups op alle GeoJSON features (alleen lijnen)
 function onEachFeature(feature, layer) {
     if (feature.geometry.type === 'LineString') {
         layer.bindPopup(generateLinePopupHtml(feature.properties), { minWidth: 200 });
@@ -78,7 +84,9 @@ function drawMap(data) {
         pointToLayer: (feature, latlng) => {
             if (feature.geometry.type === 'Point') {
                 const props = feature.properties;
-                const color = nodeColors[props.type] || '#888';
+                // GEFIXTE KLEURTOEWIJZING
+                const type = getNodeType(props.type);
+                const color = nodeColors[type] || '#888';
                 
                 const marker = L.circleMarker(latlng, {
                     radius: 7,
@@ -113,7 +121,7 @@ function drawMap(data) {
     }
 }
 
-// Functie voor filteren en zoeken (onveranderd)
+// Functie voor filteren en zoeken
 window.filterMap = function() {
     if (!fullGeoJsonData) return;
 
@@ -128,13 +136,19 @@ window.filterMap = function() {
 
         if (feature.geometry.type === 'Point') {
             const label = props.label ? props.label.toLowerCase() : '';
-            
+            const nodeType = getNodeType(props.type); // Gebruik de geconsolideerde type
+
             if (searchTerm && !label.includes(searchTerm)) {
                 feature.visible = false;
             }
-
-            if (feature.visible && filterType !== 'all' && props.type !== filterType) {
-                feature.visible = false;
+            
+            // GEFIXTE FILTERLOGICA
+            if (feature.visible && filterType !== 'all') {
+                if (filterType === 'Person' && nodeType !== 'Person') {
+                    feature.visible = false;
+                } else if (filterType === 'City' && nodeType !== 'City') {
+                    feature.visible = false;
+                }
             }
         }
     });
@@ -142,14 +156,18 @@ window.filterMap = function() {
     drawMap(filteredData);
 };
 
-// Functie om de legenda te vullen (onveranderd)
+// Functie om de legenda te vullen (nu met consistente types)
 function createLegend() {
     const legendContent = document.getElementById('legend-content');
     let html = '<h4>Knooppunten (Locaties/Personen)</h4>';
 
-    for (const type in nodeColors) {
+    // We definiëren de types nu hier om consistent te zijn met getNodeType
+    const typesForLegend = {'Person': '#E91E63', 'Plaats': '#3388ff'};
+
+    for (const type in typesForLegend) {
+        const color = typesForLegend[type];
         html += `<div style="display: flex; align-items: center; margin-bottom: 5px;">
-            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ${nodeColors[type]}; border: 1px solid #000; margin-right: 8px;"></span>
+            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: ${color}; border: 1px solid #000; margin-right: 8px;"></span>
             <span>${type}</span>
         </div>`;
     }
@@ -163,8 +181,8 @@ function createLegend() {
     legendContent.innerHTML = html;
 }
 
-// Start de applicatie - LET OP DE NIEUWE BESTANDSNAAM
-fetch('network_data_with_full_labels.geojson')
+// Start de applicatie - gebruik de correcte bestandsnaam
+fetch('network_data_with_full_labels.geojson') // Dit is de laatst bekende, correcte naam
     .then(res => res.json())
     .then(data => {
         fullGeoJsonData = data;
